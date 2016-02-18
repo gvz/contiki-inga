@@ -221,6 +221,15 @@ endif
 %.upload_target: %.reset
 	avrdude $(AVRDUDE_OPTIONS) -P $* $(AVRDUDE_PROGRAMMER) -p $(MCU) -U flash:w:$(UPLOAD_TARGET).hex
 
+terminal: reset
+	@echo "Opening avrdude terminal mode on "$(firstword $(CMOTES))
+	avrdude $(AVRDUDE_OPTIONS) -P $(firstword $(CMOTES)) $(AVRDUDE_PROGRAMMER) -p $(MCU) -t
+
+terminal_bang: reset
+	@echo "Opening avrdude terminal mode with bitbang on "$(firstword $(CMOTES))
+	avrdude -c $(AVRDUDE_BITBANG_PROGRAMMER) -p $(MCU) -C +$(CONTIKI)/platform/inga/avrdude_bitbang.conf -b 1000 & wait $!
+	avrdude -c $(AVRDUDE_BITBANG_PROGRAMMER) -p $(MCU) -C +$(CONTIKI)/platform/inga/avrdude_bitbang.conf -t $!
+
 %.upload: %.hex %.upload_setup
 	$(MAKE) UPLOAD_TARGET=$(UPLOAD_TARGET) $(UPLOAD_MOTE_TARGETS)
 	@echo Upload done.
