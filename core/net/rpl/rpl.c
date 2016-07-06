@@ -263,6 +263,7 @@ rpl_link_neighbor_callback(const linkaddr_t *addr, int status, int numtx)
         parent->flags |= RPL_PARENT_FLAG_UPDATED;
         if(instance->of->neighbor_link_callback != NULL) {
           instance->of->neighbor_link_callback(parent, status, numtx);
+          parent->last_tx_time = clock_time();
         }
       }
     }
@@ -276,9 +277,9 @@ rpl_ipv6_neighbor_callback(uip_ds6_nbr_t *nbr)
   rpl_instance_t *instance;
   rpl_instance_t *end;
 
-  PRINTF("RPL: Removing neighbor ");
+  PRINTF("RPL: Neighbor state changed for ");
   PRINT6ADDR(&nbr->ipaddr);
-  PRINTF("\n");
+  PRINTF(", nscount=%u, state=%u\n", nbr->nscount, nbr->state);
   for(instance = &instance_table[0], end = instance + RPL_MAX_INSTANCES; instance < end; ++instance) {
     if(instance->used == 1 ) {
       p = rpl_find_parent_any_dag(instance, &nbr->ipaddr);

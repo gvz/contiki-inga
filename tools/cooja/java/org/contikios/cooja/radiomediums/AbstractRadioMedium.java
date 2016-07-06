@@ -240,8 +240,9 @@ public abstract class AbstractRadioMedium extends RadioMedium {
 				case RECEPTION_STARTED:
 				case RECEPTION_INTERFERED:
 				case RECEPTION_FINISHED:
+					break;
+
 				case UNKNOWN:
-					return;
 				case HW_ON: {
 					/* Update signal strengths */
 					updateSignalStrengths();
@@ -298,7 +299,7 @@ public abstract class AbstractRadioMedium extends RadioMedium {
 				break;
 				case TRANSMISSION_FINISHED: {
 					/* Remove radio connection */
-					
+
 					/* Connection */
 					RadioConnection connection = getActiveConnectionFrom(radio);
 					if (connection == null) {
@@ -328,7 +329,10 @@ public abstract class AbstractRadioMedium extends RadioMedium {
 					COUNTER_RX += connection.getDestinations().length;
 					COUNTER_INTERFERED += connection.getInterfered().length;
 					for (Radio intRadio : connection.getInterferedNonDestinations()) {
-						intRadio.signalReceptionEnd();
+
+					  if (intRadio.isInterfered()) {
+					    intRadio.signalReceptionEnd();
+					  }
 					}
 					
 					/* Update signal strengths */

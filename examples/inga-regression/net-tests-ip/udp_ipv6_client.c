@@ -5,7 +5,7 @@
 #include <string.h>
 
 #define DEBUG DEBUG_PRINT
-#include "net/uip-debug.h"
+#include "net/ip/uip-debug.h"
 
 #include "../test.h"
 #include "test-params.h"
@@ -73,8 +73,7 @@ PROCESS_THREAD(udp_client_process, ev, data)
 
   /* NOTE: Use IPv6 address of server here. */
   uip_ip6addr(&ipaddr, 0xfe80, 0x0000, 0x0000, 0x0000, 
-      (CONF_DEST_NODE >> 8) | 0x0200 | ((CONF_DEST_NODE & 0xFF) << 8),
-      0x0000, 0x0000, 0x0000);
+      0x0000, 0x0000, 0x0000, CONF_DEST_NODE);
 
   /* new connection with remote host */
   client_conn = udp_new(&ipaddr, UIP_HTONS(3000), NULL);

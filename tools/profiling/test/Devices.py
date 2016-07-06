@@ -327,7 +327,7 @@ class INGA(Device):
 			return
 		try:
 			self.logger.info( "Uploading DUMMY to %s"%(self.name))
-			output = subprocess.check_output(["avrdude", "-b","230400", "-P", self.path, "-c", "avr109" ,"-p","atmega1284p","-e" ], stderr=subprocess.STDOUT)
+			output = subprocess.check_output(["avrdude", "-b","230400", "-u", "-P", self.path, "-c", "avr109" ,"-p","atmega1284p","-e" ], stderr=subprocess.STDOUT)
 		except subprocess.CalledProcessError as err:
 			self.logger.error(err)
 			self.logger.error(err.output)

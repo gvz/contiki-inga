@@ -4,6 +4,6 @@
 [submodule "tools/cc2538-bsl"]
 	path = tools/cc2538-bsl
 	url = https://github.com/JelmerT/cc2538-bsl.git
-[submodule "tools/avrora"]
-	path = tools/avrora
-	url = https://github.com/ibr-cm/avrora.git
+[submodule "cpu/cc26xx/lib/cc26xxware"]
+	path = cpu/cc26xx/lib/cc26xxware
+	url = https://github.com/g-oikonomou/cc26xxware.git

@@ -55,7 +55,7 @@ PROCESS_THREAD(rime_unicast_sender, ev, data)
   PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&et));
 
   // set address
-  addr.u16 = UIP_HTONS(NET_TEST_CFG_TARGET_NODE_ID);
+  addr.u16 = UIP_HTONS(CONF_DEST_NODE);
 
   // send 10 messages
   static int8_t idx = 0;

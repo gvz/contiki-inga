@@ -23,26 +23,26 @@
 #endif /* (__APPLE__) */
 #endif /* linux */
 
-#define SLIP_END     0300
-#define SLIP_ESC     0333
-#define SLIP_ESC_END 0334
-#define SLIP_ESC_ESC 0335
+#define SLIP_END      0300
+#define SLIP_ESC      0333
+#define SLIP_ESC_END  0334
+#define SLIP_ESC_ESC  0335
 
-#define CSNA_INIT 0x01
+#define CSNA_INIT     0x01
 
-#define BUFSIZE 40
-#define HCOLS 20
-#define ICOLS 18
+#define BUFSIZE         40
+#define HCOLS           20
+#define ICOLS           18
 
-#define MODE_START_DATE 0
-#define MODE_DATE 1
-#define MODE_START_TEXT 2
-#define MODE_TEXT 3
-#define MODE_INT  4
-#define MODE_HEX  5
-#define MODE_SLIP_AUTO  6
-#define MODE_SLIP 7
-#define MODE_SLIP_HIDE  8
+#define MODE_START_DATE  0
+#define MODE_DATE        1
+#define MODE_START_TEXT  2
+#define MODE_TEXT        3
+#define MODE_INT         4
+#define MODE_HEX         5
+#define MODE_SLIP_AUTO   6
+#define MODE_SLIP        7
+#define MODE_SLIP_HIDE   8
 
 static unsigned char rxbuf[2048];
 
@@ -86,11 +86,13 @@ print_hex_line(unsigned char *prefix, unsigned char *outbuf, int index)
     }
   }
 }
+
 static void
 intHandler(int sig)
 {
   exit(0);
 }
+
 int
 main(int argc, char **argv)
 {

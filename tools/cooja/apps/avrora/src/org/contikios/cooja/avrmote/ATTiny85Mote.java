@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Swedish Institute of Computer Science.
+ * Copyright (c) 2009, Swedish Institute of Computer Science.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,35 +28,62 @@
  *
  */
 
-package org.contikios.cooja.avrmote;
+package org.contikios.cooja.avrmote.interfaces;
 
+import java.util.Collection;
+
+import javax.swing.JPanel;
+
+import org.apache.log4j.Logger;
+import org.jdom.Element;
+
+import org.contikios.cooja.ClassDescription;
+import org.contikios.cooja.Mote;
 import org.contikios.cooja.Simulation;
-import avrora.sim.platform.Tiny85;
+import org.contikios.cooja.avrmote.MicaZMote;
+import org.contikios.cooja.interfaces.Clock;
 
 /**
- * AVR-based ATTiny85 chip emulated in Avrora.
- *
- * @author David Kopf
+ * @author Fredrik Osterlind, Joakim Eriksson
  */
-public class ATTiny85Mote extends AvroraMote {
-  public static int F_CPU = 1000000;
+@ClassDescription("Cycle clock")
+public class MicaClock extends Clock {
+  private static Logger logger = Logger.getLogger(MicaClock.class);
 
-  // Delegate the mote production to the AvroraMote class
-  public ATTiny85Mote(Simulation simulation, ATTiny85MoteType type) {
-    super(simulation, type, new Tiny85.Factory());
+  private Simulation simulation;
+  private MicaZMote myMote;
+
+  private long timeDrift; /* Microseconds */
+  private double deviation;
+  
+  public MicaClock(Mote mote) {
+    simulation = mote.getSimulation();
+    myMote = (MicaZMote) mote;
+    deviation = 1.0;
   }
 
-  public Tiny85 getTiny85() {
-    return (Tiny85) getPlatform();
+  public void setTime(long newTime) {
+    logger.fatal("Can't change emulated CPU time");
   }
 
-  // Return unique Mote name
-  public String toString() {
-    return "Tiny85 " + getID();
+  public long getTime() {
+    return simulation.getSimulationTime() + timeDrift;
   }
 
-  // Return CPU frequency TODO:get current frequency
-  public int getCPUFrequency() {
-    return F_CPU;
+  public double getDeviation() {
+    return deviation;
+  }
+
+  public void setDeviation(double deviation) {
+    assert (deviation>0.0) && (deviation<=1.0);
+    this.deviation = deviation;
+  }
+
+  public void setDrift(long drift) {
+    timeDrift = drift;
+  }
+
+  public long getDrift() {
+    return timeDrift;
   }
 }

@@ -39,6 +39,7 @@
 #include "contiki.h"
 #include "dev/radio.h"
 #include "dev/cc26xx-rf.h"
+#include "dev/oscillators.h"
 #include "net/packetbuf.h"
 #include "net/rime/rimestats.h"
 #include "net/linkaddr.h"
@@ -46,6 +47,7 @@
 #include "sys/energest.h"
 #include "sys/clock.h"
 #include "sys/rtimer.h"
+#include "sys/cc.h"
 #include "lpm.h"
 #include "ti-lib.h"
 /*---------------------------------------------------------------------------*/
@@ -68,6 +70,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdbool.h>
 /*---------------------------------------------------------------------------*/
 #define BUSYWAIT_UNTIL(cond, max_time)                                \
   do {                                                                \
@@ -75,10 +78,6 @@
     t0 = RTIMER_NOW();                                                \
     while(!(cond) && RTIMER_CLOCK_LT(RTIMER_NOW(), t0 + (max_time))); \
   } while(0)
-/*---------------------------------------------------------------------------*/
-#ifndef MIN
-#define MIN(n, m)   (((n) < (m)) ? (n) : (m))
-#endif
 /*---------------------------------------------------------------------------*/
 #ifdef __GNUC__
 #define CC_ALIGN_ATTR(n) __attribute__ ((aligned(n)))
@@ -92,6 +91,12 @@
 #else
 #define PRINTF(...)
 #endif
+/*---------------------------------------------------------------------------*/
+#ifdef CC26XX_CONF_DEBUG_CRC
+#define CC26XX_DEBUG_CRC CC26XX_CONF_DEBUG_CRC
+#else /* CC26XX_CONF_DEBUG_CRC */
+#define CC26XX_DEBUG_CRC DEBUG
+#endif /* CC26XX_CONF_DEBUG_CRC */
 /*---------------------------------------------------------------------------*/
 /* Data entry status field constants */
 #define DATA_ENTRY_STATUS_PENDING    0x00 /* Not in use by the Radio CPU */
@@ -267,15 +272,22 @@ const output_config_t *tx_power_current = &output_power[0];
 /*---------------------------------------------------------------------------*/
 /* RF interrupts */
 #define RX_IRQ       IRQ_IEEE_RX_ENTRY_DONE
-#define TX_IRQ       IRQ_IEEE_TX_FRAME
+#define RX_NOK_IRQ   IRQ_IEEE_RX_NOK
 #define TX_ACK_IRQ   IRQ_IEEE_TX_ACK
 #define ERROR_IRQ    IRQ_INTERNAL_ERROR
 
+/* Those IRQs are enabled all the time */
+#if CC26XX_DEBUG_CRC
+#define ENABLED_IRQS (RX_IRQ | ERROR_IRQ | RX_NOK_IRQ)
+#else
+#define ENABLED_IRQS (RX_IRQ | ERROR_IRQ)
+#endif
+
 /*
- * We don't really care about TX ISR, we just use it to bring the CM3 out
- * of sleep, which it enters while the RF is TXing
+ * We only enable this right before starting frame TX, so we can sleep while
+ * the TX is ongoing
  */
-#define ENABLED_IRQS (RX_IRQ + TX_IRQ + ERROR_IRQ)
+#define LAST_FG_CMD_DONE  IRQ_LAST_FG_COMMAND_DONE
 
 #define cc26xx_rf_cpe0_isr RFCCPE0IntHandler
 #define cc26xx_rf_cpe1_isr RFCCPE1IntHandler
@@ -391,80 +403,12 @@ static int on(void);
 static int off(void);
 static void setup_interrupts(void);
 /*---------------------------------------------------------------------------*/
-/* Select the HF XOSC as the source for the HF clock, but don't switch yet */
-static void
-request_hf_xosc(void)
-{
-  /* Enable OSC DIG interface to change clock sources */
-  ti_lib_osc_interface_enable();
-
-  /* Make sure the SMPH clock within AUX is enabled */
-  ti_lib_aux_wuc_clock_enable(AUX_WUC_SMPH_CLOCK);
-  while(ti_lib_aux_wuc_clock_status(AUX_WUC_SMPH_CLOCK) != AUX_WUC_CLOCK_READY);
-
-  if(ti_lib_osc_clock_source_get(OSC_SRC_CLK_HF) != OSC_XOSC_HF) {
-    /*
-     * Request to switch to the crystal to enable radio operation. It takes a
-     * while for the XTAL to be ready so instead of performing the actual
-     * switch, we return and we do other stuff while the XOSC is getting ready.
-     */
-    ti_lib_osc_clock_source_set(OSC_SRC_CLK_MF | OSC_SRC_CLK_HF, OSC_XOSC_HF);
-  }
-
-  /* Disable OSC DIG interface */
-  ti_lib_osc_interface_disable();
-}
-/*---------------------------------------------------------------------------*/
-/*
- * Switch to the XOSC. This will block until the XOSC is ready, so this must
- * be preceded by a call to select_hf_xosc()
- */
-static void
-switch_to_hf_xosc(void)
-{
-  /* Enable OSC DIG interface to change clock sources */
-  ti_lib_osc_interface_enable();
-
-  /* Make sure the SMPH clock within AUX is enabled */
-  ti_lib_aux_wuc_clock_enable(AUX_WUC_SMPH_CLOCK);
-  while(ti_lib_aux_wuc_clock_status(AUX_WUC_SMPH_CLOCK) != AUX_WUC_CLOCK_READY);
-
-  if(ti_lib_osc_clock_source_get(OSC_SRC_CLK_HF) != OSC_XOSC_HF) {
-    /* Switch the HF clock source (cc26xxware executes this from ROM) */
-    ti_lib_osc_hf_source_switch();
-  }
-
-  /* Disable OSC DIG interface */
-  ti_lib_osc_interface_disable();
-}
-/*---------------------------------------------------------------------------*/
-static void
-switch_to_hf_rc_osc(void)
-{
-  /* Enable OSC DIG interface to change clock sources */
-  ti_lib_osc_interface_enable();
-
-  /* Make sure the SMPH clock within AUX is enabled */
-  ti_lib_aux_wuc_clock_enable(AUX_WUC_SMPH_CLOCK);
-  while(ti_lib_aux_wuc_clock_status(AUX_WUC_SMPH_CLOCK) != AUX_WUC_CLOCK_READY);
-
-  /* Set all clock sources to the HF RC Osc */
-  ti_lib_osc_clock_source_set(OSC_SRC_CLK_MF | OSC_SRC_CLK_HF, OSC_RCOSC_HF);
-
-  /* Check to not enable HF RC oscillator if already enabled */
-  if(ti_lib_osc_clock_source_get(OSC_SRC_CLK_HF) != OSC_RCOSC_HF) {
-    /* Switch the HF clock source (cc26xxware executes this from ROM) */
-    ti_lib_osc_hf_source_switch();
-  }
-  ti_lib_osc_interface_disable();
-}
-/*---------------------------------------------------------------------------*/
 static uint8_t
 rf_is_accessible(void)
 {
   if(ti_lib_prcm_rf_ready() &&
      ti_lib_prcm_power_domain_status(PRCM_DOMAIN_RFCORE) ==
-         PRCM_DOMAIN_POWER_ON) {
+     PRCM_DOMAIN_POWER_ON) {
     return 1;
   }
   return 0;
@@ -496,16 +440,19 @@ static uint_fast8_t
 rf_send_cmd(uint32_t cmd, uint32_t *status)
 {
   uint32_t timeout_count = 0;
+  bool interrupts_disabled;
 
   /*
    * Make sure ContikiMAC doesn't turn us off from within an interrupt while
    * we are accessing RF Core registers
    */
-  ti_lib_int_master_disable();
+  interrupts_disabled = ti_lib_int_master_disable();
 
   if(!rf_is_accessible()) {
     PRINTF("rf_send_cmd: RF was off\n");
-    ti_lib_int_master_enable();
+    if(!interrupts_disabled) {
+      ti_lib_int_master_enable();
+    }
     return RF_CMD_ERROR;
   }
 
@@ -514,12 +461,16 @@ rf_send_cmd(uint32_t cmd, uint32_t *status)
     *status = HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDSTA);
     if(++timeout_count > 50000) {
       PRINTF("rf_send_cmd: Timeout\n");
-      ti_lib_int_master_enable();
+      if(!interrupts_disabled) {
+        ti_lib_int_master_enable();
+      }
       return RF_CMD_ERROR;
     }
   } while(*status == RF_CMD_STATUS_PENDING);
 
-  ti_lib_int_master_enable();
+  if(!interrupts_disabled) {
+    ti_lib_int_master_enable();
+  }
 
   /*
    * If we reach here the command is no longer pending. It is either completed
@@ -910,7 +861,7 @@ init_rf_params(void)
   GET_FIELD(cmd_ieee_rx_buf, radioOp, condition) = COND_NEVER;
   GET_FIELD(cmd_ieee_rx_buf, CMD_IEEE_RX, channel) = CC26XX_RF_CHANNEL;
   GET_FIELD(cmd_ieee_rx_buf, CMD_IEEE_RX, rxConfig) =
-    BITVALUE(CMD_IEEE_RX, rxConfig, bAutoFlushCrc, 0) |
+    BITVALUE(CMD_IEEE_RX, rxConfig, bAutoFlushCrc, 1) |
     BITVALUE(CMD_IEEE_RX, rxConfig, bAutoFlushIgn, 0) |
     BITVALUE(CMD_IEEE_RX, rxConfig, bIncludePhyHdr, 0) |
     BITVALUE(CMD_IEEE_RX, rxConfig, bIncludeCrc, 1) |
@@ -952,10 +903,11 @@ init_rf_params(void)
   /* Configure CCA settings */
   GET_FIELD(cmd_ieee_rx_buf, CMD_IEEE_RX, ccaOpt) =
     BITVALUE(CMD_IEEE_RX, ccaOpt, ccaEnEnergy, 1) |
-    BITVALUE(CMD_IEEE_RX, ccaOpt, ccaEnCorr, 0) |
+    BITVALUE(CMD_IEEE_RX, ccaOpt, ccaEnCorr, 1) |
     BITVALUE(CMD_IEEE_RX, ccaOpt, ccaEnSync, 0) |
-    BITVALUE(CMD_IEEE_RX, ccaOpt, ccaCorrOp, 0) |
-    BITVALUE(CMD_IEEE_RX, ccaOpt, ccaSyncOp, 0);
+    BITVALUE(CMD_IEEE_RX, ccaOpt, ccaCorrOp, 1) |
+    BITVALUE(CMD_IEEE_RX, ccaOpt, ccaSyncOp, 1) |
+    BITVALUE(CMD_IEEE_RX, ccaOpt, ccaCorrThr, 3);
   /* Set CCA RSSI Threshold, 0xA6 corresponds to -90dBm (two's comp.)*/
   GET_FIELD(cmd_ieee_rx_buf, CMD_IEEE_RX, ccaRssiThr) = 0xA6;
   GET_FIELD(cmd_ieee_rx_buf, CMD_IEEE_RX, numExtEntries) = 0x00;
@@ -976,8 +928,8 @@ static int
 power_up(void)
 {
   uint32_t cmd_status;
+  bool interrupts_disabled = ti_lib_int_master_disable();
 
-  ti_lib_int_master_disable();
   ti_lib_int_pend_clear(INT_RF_CPE0);
   ti_lib_int_pend_clear(INT_RF_CPE1);
   ti_lib_int_disable(INT_RF_CPE0);
@@ -1000,7 +952,10 @@ power_up(void)
   HWREG(RFC_DBELL_NONBUF_BASE + RFC_DBELL_O_RFCPEIEN) = 0x0;
   ti_lib_int_enable(INT_RF_CPE0);
   ti_lib_int_enable(INT_RF_CPE1);
-  ti_lib_int_master_enable();
+
+  if(!interrupts_disabled) {
+    ti_lib_int_master_enable();
+  }
 
   /* Let CPE boot */
   HWREG(RFC_PWR_NONBUF_BASE + RFC_PWR_O_PWMCLKEN) = RF_CORE_CLOCKS_MASK;
@@ -1020,7 +975,7 @@ power_up(void)
 static void
 power_down(void)
 {
-  ti_lib_int_master_disable();
+  bool interrupts_disabled = ti_lib_int_master_disable();
   ti_lib_int_disable(INT_RF_CPE0);
   ti_lib_int_disable(INT_RF_CPE1);
 
@@ -1043,7 +998,9 @@ power_down(void)
   ti_lib_int_pend_clear(INT_RF_CPE1);
   ti_lib_int_enable(INT_RF_CPE0);
   ti_lib_int_enable(INT_RF_CPE1);
-  ti_lib_int_master_enable();
+  if(!interrupts_disabled) {
+    ti_lib_int_master_enable();
+  }
 }
 /*---------------------------------------------------------------------------*/
 static int
@@ -1109,6 +1066,13 @@ rx_isr(void)
   process_poll(&cc26xx_rf_process);
 }
 /*---------------------------------------------------------------------------*/
+static void
+rx_nok_isr(void)
+{
+  RIMESTATS_ADD(badcrc);
+  PRINTF("RF: Bad CRC\n");
+}
+/*---------------------------------------------------------------------------*/
 void
 cc26xx_rf_cpe1_isr(void)
 {
@@ -1147,7 +1111,11 @@ cc26xx_rf_cpe0_isr(void)
   if(HWREG(RFC_DBELL_NONBUF_BASE + RFC_DBELL_O_RFCPEIFG) & RX_IRQ) {
     rx_isr();
   }
-
+  if(CC26XX_DEBUG_CRC) {
+    if(HWREG(RFC_DBELL_NONBUF_BASE + RFC_DBELL_O_RFCPEIFG) & RX_NOK_IRQ) {
+      rx_nok_isr();
+    }
+  }
   /* Clear interrupt flags */
   HWREG(RFC_DBELL_NONBUF_BASE + RFC_DBELL_O_RFCPEIFG) = 0x0;
   ti_lib_int_master_enable();
@@ -1158,6 +1126,8 @@ cc26xx_rf_cpe0_isr(void)
 static void
 setup_interrupts(void)
 {
+  bool interrupts_disabled;
+
   /* We are already turned on by the caller, so this should not happen */
   if(!rf_is_accessible()) {
     PRINTF("setup_interrupts: No access\n");
@@ -1165,7 +1135,7 @@ setup_interrupts(void)
   }
 
   /* Disable interrupts */
-  ti_lib_int_master_disable();
+  interrupts_disabled = ti_lib_int_master_disable();
 
   /* Set all interrupt channels to CPE0 channel, error to CPE1 */
   HWREG(RFC_DBELL_NONBUF_BASE + RFC_DBELL_O_RFCPEISL) = ERROR_IRQ;
@@ -1180,7 +1150,10 @@ setup_interrupts(void)
   ti_lib_int_pend_clear(INT_RF_CPE1);
   ti_lib_int_enable(INT_RF_CPE0);
   ti_lib_int_enable(INT_RF_CPE1);
-  ti_lib_int_master_enable();
+
+  if(!interrupts_disabled) {
+    ti_lib_int_master_enable();
+  }
 }
 /*---------------------------------------------------------------------------*/
 static uint8_t
@@ -1197,7 +1170,7 @@ request(void)
   return LPM_MODE_MAX_SUPPORTED;
 }
 /*---------------------------------------------------------------------------*/
-LPM_MODULE(cc26xx_rf_lpm_module, request, NULL, NULL);
+LPM_MODULE(cc26xx_rf_lpm_module, request, NULL, NULL, LPM_DOMAIN_NONE);
 /*---------------------------------------------------------------------------*/
 static int
 init(void)
@@ -1295,6 +1268,10 @@ transmit(unsigned short transmit_len)
   GET_FIELD(cmd_immediate_buf, CMD_IEEE_TX, payloadLen) = transmit_len;
   GET_FIELD(cmd_immediate_buf, CMD_IEEE_TX, pPayload) = tx_buf;
 
+  /* Enable the LAST_FG_COMMAND_DONE interrupt, which will wake us up */
+  HWREG(RFC_DBELL_NONBUF_BASE + RFC_DBELL_O_RFCPEIEN) = ENABLED_IRQS +
+    LAST_FG_CMD_DONE;
+
   ret = rf_send_cmd((uint32_t)cmd_immediate_buf, &cmd_status);
 
   if(ret) {
@@ -1335,9 +1312,11 @@ transmit(unsigned short transmit_len)
   ENERGEST_OFF(ENERGEST_TYPE_TRANSMIT);
   ENERGEST_ON(ENERGEST_TYPE_LISTEN);
 
-  if(was_off) {
-    off();
-  }
+  /*
+   * Disable LAST_FG_COMMAND_DONE interrupt. We don't really care about it
+   * except when we are transmitting
+   */
+  HWREG(RFC_DBELL_NONBUF_BASE + RFC_DBELL_O_RFCPEIEN) = ENABLED_IRQS;
 
   return ret;
 }
@@ -1349,33 +1328,55 @@ send(const void *payload, unsigned short payload_len)
   return transmit(payload_len);
 }
 /*---------------------------------------------------------------------------*/
+static void
+release_data_entry(void)
+{
+  /* Clear the length byte */
+  rx_read_entry[8] = 0;
+  /* Set status to 0 "Pending" in element */
+  GET_FIELD_V(rx_read_entry, dataEntry, status) = DATA_ENTRY_STATUS_PENDING;
+  rx_read_entry = GET_FIELD_V(rx_read_entry, dataEntry, pNextEntry);
+}
+/*---------------------------------------------------------------------------*/
 static int
 read_frame(void *buf, unsigned short buf_len)
 {
+  int8_t rssi;
   int len = 0;
+  uint8_t status = GET_FIELD_V(rx_read_entry, dataEntry, status);
 
-  if(GET_FIELD_V(rx_read_entry, dataEntry, status) == DATA_ENTRY_STATUS_FINISHED) {
-    /* Set status to 0 "Pending" in element */
-    GET_FIELD_V(rx_read_entry, dataEntry, status) = DATA_ENTRY_STATUS_PENDING;
-
-    if(rx_read_entry[8] > 0) {
-      memcpy(buf, (char *)&rx_read_entry[9], buf_len);
-
-      /* Remove the footer */
-      len = MIN(buf_len, rx_read_entry[8] - 4);
-
-      int rssi = (int8_t)rx_read_entry[9 + len + 2];
-
-      packetbuf_set_attr(PACKETBUF_ATTR_RSSI, rssi);
-      RIMESTATS_ADD(llrx);
-
-      /* Clear the length byte */
-      rx_read_entry[8] = 0;
-    }
-
-    /* Move read entry pointer to next entry */
-    rx_read_entry = GET_FIELD_V(rx_read_entry, dataEntry, pNextEntry);
+  if(status != DATA_ENTRY_STATUS_FINISHED) {
+    /* No available data */
+    return 0;
   }
+
+
+  if(rx_read_entry[8] < 4) {
+    PRINTF("RF: too short\n");
+    RIMESTATS_ADD(tooshort);
+
+    release_data_entry();
+    return 0;
+  }
+
+  len = rx_read_entry[8] - 4;
+
+  if(len > buf_len) {
+    PRINTF("RF: too long\n");
+    RIMESTATS_ADD(toolong);
+
+    release_data_entry();
+    return 0;
+  }
+
+  memcpy(buf, (char *)&rx_read_entry[9], len);
+
+  rssi = (int8_t)rx_read_entry[9 + len + 2];
+
+  packetbuf_set_attr(PACKETBUF_ATTR_RSSI, rssi);
+  RIMESTATS_ADD(llrx);
+
+  release_data_entry();
 
   return len;
 }
@@ -1522,7 +1523,7 @@ on(void)
    * Request the HF XOSC as the source for the HF clock. Needed before we can
    * use the FS. This will only request, it will _not_ perform the switch.
    */
-  request_hf_xosc();
+  oscillators_request_hf_xosc();
 
   /*
    * If we are in the middle of a BLE operation, we got called by ContikiMAC
@@ -1560,7 +1561,7 @@ on(void)
    * This will block until the XOSC is actually ready, but give how we
    * requested it early on, this won't be too long a wait/
    */
-  switch_to_hf_xosc();
+  oscillators_switch_to_hf_xosc();
 
   if(rf_radio_setup(RF_MODE_IEEE) != RF_CMD_OK) {
     PRINTF("on: radio_setup() failed\n");
@@ -1589,7 +1590,7 @@ off(void)
   power_down();
 
   /* Switch HF clock source to the RCOSC to preserve power */
-  switch_to_hf_rc_osc();
+  oscillators_switch_to_hf_rc();
 
   /* We pulled the plug, so we need to restore the status manually */
   GET_FIELD(cmd_ieee_rx_buf, radioOp, status) = IDLE;
@@ -1985,6 +1986,7 @@ PROCESS_THREAD(cc26xx_rf_ble_beacon_process, ev, data)
   uint8_t was_on;
   int j;
   uint32_t cmd_status;
+  bool interrupts_disabled;
 
   PROCESS_BEGIN();
 
@@ -2015,9 +2017,11 @@ PROCESS_THREAD(cc26xx_rf_ble_beacon_process, ev, data)
        * Under ContikiMAC, some IEEE-related operations will be called from an
        * interrupt context. We need those to see that we are in BLE mode.
        */
-      ti_lib_int_master_disable();
+      interrupts_disabled = ti_lib_int_master_disable();
       ble_mode_on = 1;
-      ti_lib_int_master_enable();
+      if(!interrupts_disabled) {
+        ti_lib_int_master_enable();
+      }
 
       /*
        * Send BLE_ADV_MESSAGES beacon bursts. Each burst on all three
@@ -2053,7 +2057,7 @@ PROCESS_THREAD(cc26xx_rf_ble_beacon_process, ev, data)
         }
       } else {
         /* Request the HF XOSC to source the HF clock. */
-        request_hf_xosc();
+        oscillators_request_hf_xosc();
 
         /* We were off: Boot the CPE */
         if(power_up() != RF_CMD_OK) {
@@ -2071,7 +2075,7 @@ PROCESS_THREAD(cc26xx_rf_ble_beacon_process, ev, data)
         }
 
         /* Trigger a switch to the XOSC, so that we can use the FS */
-        switch_to_hf_xosc();
+        oscillators_switch_to_hf_xosc();
       }
 
       /* Enter BLE mode */
@@ -2110,13 +2114,17 @@ PROCESS_THREAD(cc26xx_rf_ble_beacon_process, ev, data)
         power_down();
 
         /* Switch HF clock source to the RCOSC to preserve power */
-        switch_to_hf_rc_osc();
+        oscillators_switch_to_hf_rc();
       }
       etimer_set(&ble_adv_et, BLE_ADV_DUTY_CYCLE);
 
-      ti_lib_int_master_disable();
+      interrupts_disabled = ti_lib_int_master_disable();
+
       ble_mode_on = 0;
-      ti_lib_int_master_enable();
+
+      if(!interrupts_disabled) {
+        ti_lib_int_master_enable();
+      }
 
       /* Wait unless this is the last burst */
       if(i < BLE_ADV_MESSAGES - 1) {
@@ -2124,9 +2132,13 @@ PROCESS_THREAD(cc26xx_rf_ble_beacon_process, ev, data)
       }
     }
 
-    ti_lib_int_master_disable();
+    interrupts_disabled = ti_lib_int_master_disable();
+
     ble_mode_on = 0;
-    ti_lib_int_master_enable();
+
+    if(!interrupts_disabled) {
+      ti_lib_int_master_enable();
+    }
   }
   PROCESS_END();
 }
