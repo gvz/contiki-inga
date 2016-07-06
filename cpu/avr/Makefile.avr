@@ -47,7 +47,7 @@ CFLAGSNO = -Wall -mmcu=$(MCU) -gdwarf-2 -fno-strict-aliasing \
             -I$(CONTIKI)/platform/$(TARGET) \
             -I. -I$(CONTIKI)/core -I$(CONTIKI_CPU) $(USB_INCLUDES) \
             $(CONTIKI_PLAT_DEFS)
-CFLAGS   += $(CFLAGSNO) -O$(OPTI) -D__PROG_TYPES_COMPAT__
+override CFLAGS   += $(CFLAGSNO) -O$(OPTI) -D__PROG_TYPES_COMPAT__
 ASFLAGS  += -mmcu=$(MCU)
 ifndef BOOTLOADER_START
   BOOTLOADER_START = 0x1F800
@@ -60,8 +60,8 @@ SMALL ?= 1
 
 ### These flags help significantly reduce the code size
 ifeq ($(SMALL),1)
-CFLAGS += -ffunction-sections
-CFLAGS += -fdata-sections
+override CFLAGS += -ffunction-sections
+override CFLAGS += -fdata-sections
 LDFLAGS += -Wl,--gc-sections
 endif # SMALL
 
