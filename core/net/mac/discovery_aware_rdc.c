@@ -50,6 +50,7 @@
 #include "sys/etimer.h"
 #include <stdio.h>
 #include <string.h>
+#include "net/mac/mac-sequence.h"
 
 
 #include "net/uDTN/discovery.h"
@@ -118,7 +119,6 @@ struct seqno {
 #if DISCOVERY_AWARE_RDC_SEND_802154_ACK
 #include "net/mac/frame802154.h"
 #endif /* DISCOVERY_AWARE_RDC_SEND_802154_ACK */
-static struct seqno received_seqnos[MAX_SEQNOS];
 #endif /* DISCOVERY_AWARE_RDC_802154_AUTOACK || DISCOVERY_AWARE_RDC_802154_AUTOACK_HW */
 
 #ifndef DISCOVERY_AWARE_RDC_CONF_RADIO_OFF_TIMEOUT
@@ -356,22 +356,11 @@ packet_input(void)
 #if DISCOVERY_AWARE_RDC_802154_AUTOACK || DISCOVERY_AWARE_RDC_802154_AUTOACK_HW
 			/* Check for duplicate packet by comparing the sequence number
        of the incoming packet with the last few ones we saw. */
-			int i;
-			for(i = 0; i < MAX_SEQNOS; ++i) {
-				if(packetbuf_attr(PACKETBUF_ATTR_PACKET_ID) == received_seqnos[i].seqno &&
-						linkaddr_cmp(packetbuf_addr(PACKETBUF_ADDR_SENDER),
-								&received_seqnos[i].sender)) {
+				if(mac_sequence_is_duplicate()) {
 					/* Drop the packet. */
 					return;
 				}
-			}
-			for(i = MAX_SEQNOS - 1; i > 0; --i) {
-				memcpy(&received_seqnos[i], &received_seqnos[i - 1],
-						sizeof(struct seqno));
-			}
-			received_seqnos[0].seqno = packetbuf_attr(PACKETBUF_ATTR_PACKET_ID);
-			linkaddr_copy(&received_seqnos[0].sender,
-					packetbuf_addr(PACKETBUF_ADDR_SENDER));
+			mac_sequence_register_seqno();
 #endif /* DISCOVERY_AWARE_RDC_802154_AUTOACK */
 
 			if (!linkaddr_cmp(packetbuf_addr(PACKETBUF_ADDR_RECEIVER), &linkaddr_null)) {
