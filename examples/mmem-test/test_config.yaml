@@ -1,0 +1,22 @@
+tests:
+### mmem test
+  - name: mmem-test
+    timeout: 900
+    devices:
+      - name: receiver
+        programdir: examples/mmem-test
+        program: mmem-test
+        instrument: [examples/mmem-test/mmem-test.c]
+        debug: []
+        cflags: "-D__DELAY_BACKWARD_COMPATIBLE__ -fno-inline -DPROFILES_CONF_MAX=100 -DPROFILES_CONF_STACKSIZE=30"
+        graph_options: ""
+  - name: mmem-test-uninstr
+    timeout: 900
+    devices:
+      - name: receiver
+        programdir: examples/mmem-test
+        program: mmem-test
+        instrument: []
+        debug: []
+        cflags: "-fno-inline"
+        graph_options: ""
