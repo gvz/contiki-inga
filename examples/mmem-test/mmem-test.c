@@ -40,7 +40,7 @@
 
 #include "contiki.h"
 #include "lib/mmem.h"
-#include "sys/profiling.h"
+#include "sys/profiling/profiling.h"
 #include "sys/test.h"
 
 #include <stdio.h>
