@@ -64,7 +64,6 @@ static void dtn_network_input(void)
 	uint8_t length = 0;
 	packetbuf_attr_t rssi = 0;
 
-	leds_on(LEDS_ALL);
 
 	/* Create a copy here, because otherwise packetbuf_clear will evaporate the address */
 	linkaddr_copy(&source, packetbuf_addr(PACKETBUF_ADDR_SENDER));
@@ -74,7 +73,6 @@ static void dtn_network_input(void)
 
 	convergence_layer_incoming_frame(&source, buffer, length, rssi);
 
-	leds_off(LEDS_ALL);
 }
 
 /**
@@ -127,7 +125,6 @@ uint8_t dtn_network_get_buffer_length() {
 
 void dtn_network_send(linkaddr_t * destination, uint8_t length, void * reference)
 {
-	leds_on(LEDS_YELLOW);
 
 	/* Set the data length */
 	packetbuf_set_datalen(length);
@@ -141,7 +138,6 @@ void dtn_network_send(linkaddr_t * destination, uint8_t length, void * reference
 	/* Send it out via the MAC */
 	NETSTACK_MAC.send(&dtn_network_sent, reference);
 
-	leds_off(LEDS_YELLOW);
 }
 
 /**
