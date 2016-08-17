@@ -182,7 +182,6 @@
 #endif /* NETSTACK_CONF_WITH_IPV6 */
 
 /* -- Radio driver settings */
-#define CHANNEL_802_15_4          26
 #define RADIO_CONF_CALIBRATE_INTERVAL 256
 /* AUTOACK receive mode gives better rssi measurements,
  * even if ACK is never requested */
