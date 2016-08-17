@@ -55,7 +55,7 @@ void delivery_unblock_service(struct mmem * bundlemem) {
 		n != NULL;
 		n = list_item_next(n)) {
 
-		if(n->app_id == bundle->dst_srv) {
+		if(n->app_id == bundle->dst_srv &&  n->node_id == bundle->dst_node) {
 			if(n->status == APP_ACTIVE) {
 				if( n->busy ) {
 					LOG(LOGD_DTN, LOG_BUNDLE, LOGL_DBG, "unblocking service");
@@ -120,8 +120,9 @@ int delivery_deliver_bundle(struct mmem *bundlemem) {
 					LOG(LOGD_DTN, LOG_BUNDLE, LOGL_DBG, "Service is busy");
 					busy = 1;
 				}
-			} else
+			} else {
 				LOG(LOGD_DTN, LOG_BUNDLE, LOGL_DBG, "Service is inactive");
+			}
 		}
 	}
 
