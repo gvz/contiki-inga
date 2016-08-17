@@ -45,6 +45,11 @@
 
 /* MCU and clock rate */
 #include <stdint.h>
+/* Include the project config.
+ * PROJECT_CONF_H might be defined in the project Makefile */
+#ifdef PROJECT_CONF_H
+#include PROJECT_CONF_H
+#endif /* PROJECT_CONF_H */
 #include "platform-conf.h"
 
 #include <avr/eeprom.h>
@@ -289,10 +294,5 @@
 #define CC_CONF_INLINE inline
 #endif 
 
-/* Include the project config.
- * PROJECT_CONF_H might be defined in the project Makefile */
-#ifdef PROJECT_CONF_H
-#include PROJECT_CONF_H
-#endif /* PROJECT_CONF_H */
 
 #endif /* __CONTIKI_CONF_H__ */
