@@ -77,9 +77,9 @@ AUTOSTART_PROCESSES(&timesync_process);
 
 #define MAX_SYNC_GROUP_MEMBERS 10
 #define SYNC_MULTICAST_ID 1
-#define SYNC_MULTICAST_SRV_ID 1
+#define SYNC_MULTICAST_SRV_ID 12
 
-static uint8_t pairing_active = 1;
+static uint8_t pairing_active = 0;
 static uint16_t timesync_group[MAX_SYNC_GROUP_MEMBERS]; 
 static uint16_t timesync_interval = 10;
 /*---------------------------------------------------------------------------*/
@@ -173,7 +173,7 @@ PROCESS_THREAD(timesync_process, ev, data)
 		timesync_group[i]=0;
 	}
 	etimer_set(&timer, CLOCK_SECOND);
-	PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&timer) );
+	//PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&timer) );
 	udtn_clock_init();
     
 	     	/* Register our endpoint */
