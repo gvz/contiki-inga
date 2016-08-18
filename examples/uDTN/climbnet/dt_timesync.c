@@ -93,7 +93,7 @@ static inline struct mmem *bundle_convenience(uint16_t dest, uint16_t dst_srv, u
 
 	bundlemem = bundle_create_bundle();
 	if (!bundlemem) {
-		printf("create_bundle failed\n");
+		PRINTF("create_bundle failed\n");
 		return NULL;
 	}
 
@@ -123,7 +123,7 @@ static inline struct mmem *bundle_convenience(uint16_t dest, uint16_t dst_srv, u
 
 void timesync_init(void)
 {
-	printf("Starting timesync\n");
+	PRINTF("Starting timesync\n");
 
 	process_start(&timesync_process, NULL);
 }
@@ -187,7 +187,7 @@ PROCESS_THREAD(timesync_process, ev, data)
 	reg_dummy.app_id = SYNC_MULTICAST_SRV_ID;
 	reg_dummy.node_id = dtn_node_id;
 	process_post(&agent_process, dtn_application_registration_event, &reg_dummy);
-	printf("started timesync process\n");
+	PRINTF("started timesync process\n");
 
 
 	while(1) {
@@ -205,9 +205,9 @@ PROCESS_THREAD(timesync_process, ev, data)
 				bundlemem = bundle_convenience(SYNC_MULTICAST_ID, SYNC_MULTICAST_SRV_ID, SYNC_MULTICAST_SRV_ID, (uint8_t*)&time_sync_payload, sizeof(struct time_sync_payload_t));
                 if (bundlemem) {
 	                process_post(&agent_process, dtn_send_bundle_event, (void *) bundlemem);
-	                printf("TIME_SYNC: sending sync reply\n");
+	                PRINTF("TIME_SYNC: sending sync reply\n");
                 } else {
-                    printf("TIME_SYNC: unable to send sync reply\n");
+                    PRINTF("TIME_SYNC: unable to send sync reply\n");
                 }
                 i = 0;
                 while (timesync_group[i] == 0){
@@ -216,7 +216,7 @@ PROCESS_THREAD(timesync_process, ev, data)
                 if (i == 0){
                     if (udtn_getclockstate() < UDTN_CLOCK_STATE_POOR){
                         udtn_setclockstate(UDTN_CLOCK_STATE_POOR);
-                        printf("TIMESYNC: set clock state Poor\n");
+                        PRINTF("TIMESYNC: set clock state Poor\n");
                     }
                 }
 
@@ -225,26 +225,26 @@ PROCESS_THREAD(timesync_process, ev, data)
 
 			udtn_timeval_t time;
 			udtn_gettimeofday(&time);
-			printf("TIME: %lu %lu\n",time.tv_sec,time.tv_usec);
+			PRINTF("TIME: %lu %lu\n",time.tv_sec,time.tv_usec);
 		}
 
 		if( ev == submit_data_to_application_event ) {
-            printf("TIME_SYNC: i got a bundle\n");
+            PRINTF("TIME_SYNC: i got a bundle\n");
 			/* We received a bundle - handle it */
 			recv = (struct mmem *) data;
 			/* Check receiver */
 			block = bundle_get_payload_block(recv);
 			if( block == NULL ) {
-				printf("TIME_SYNC: No Payload\n");
+				PRINTF("TIME_SYNC: No Payload\n");
 			} else {
 				struct time_sync_payload_t *tmp_load = (struct time_sync_payload_t*)block->payload; 
 				if (tmp_load->node_id == dtn_node_id){
 					//it my bundle so I do not care
-					printf("TIME_SYNC: %u received my own packet, drop it\n", tmp_load->node_id);
+					PRINTF("TIME_SYNC: %u received my own packet, drop it\n", tmp_load->node_id);
 					process_post(&agent_process, dtn_processing_finished, recv);
 					continue;
                 }
-				printf("TIME_SYNC: received budle from %u\n",tmp_load->node_id);
+				PRINTF("TIME_SYNC: received budle from %u\n",tmp_load->node_id);
 
 				// check if this node is kown
                 i = 0;
@@ -264,7 +264,7 @@ PROCESS_THREAD(timesync_process, ev, data)
                 bundle = (struct bundle_t *) MMEM_PTR(recv);
                 if (!known && pairing_active && (bundle->dst_node == SYNC_MULTICAST_ID)){
 	                //add node to timesync group if pairing mode is active
-	                printf("TIME_SYNC: adding %u to timesync group\n",tmp_load->node_id);
+	                PRINTF("TIME_SYNC: adding %u to timesync group\n",tmp_load->node_id);
 	                timesync_group[next] = tmp_load->node_id;
 	                if ( (tmp_load->node_id < timesync_master && tmp_load->state >= udtn_getclockstate()) ||
 	                     // if the node_id is smaller and the cock is equal of more accurate as ours 
@@ -272,7 +272,7 @@ PROCESS_THREAD(timesync_process, ev, data)
 		                // or if the its clock is more accurate we use it as the clock master
 
 		                timesync_master = tmp_load->node_id;
-                        printf("TIME_SYNC: %u is our master \n",tmp_load->node_id);
+                        PRINTF("TIME_SYNC: %u is our master \n",tmp_load->node_id);
 
                         struct bundle_t * bundle = NULL;
                         bundle = (struct bundle_t *) MMEM_PTR(recv);
@@ -283,16 +283,16 @@ PROCESS_THREAD(timesync_process, ev, data)
                         bundlemem = bundle_convenience(bundle->src_node, bundle->src_srv, SYNC_MULTICAST_SRV_ID, (uint8_t*)&time_sync_payload, sizeof(struct time_sync_payload_t));
                         if (bundlemem) {
                             process_post(&agent_process, dtn_send_bundle_event, (void *) bundlemem);
-                            printf("TIME_SYNC: sending sync\n");
+                            PRINTF("TIME_SYNC: sending sync\n");
                         } else {
-	                        printf("TIME_SYNC: unable to send sync\n");
+	                        PRINTF("TIME_SYNC: unable to send sync\n");
                         }
 	                }
                 }
                 if (tmp_load->node_id == timesync_master){
 	                // this is a time sync packet form our time master, so we need to set our clock
-                    printf("TIME_SYNC: got bundel from our master %u\n",tmp_load->node_id);
-                    printf("TIME_SYNC: bundel is %lu ms old\n", bundle_ageing_get_age(recv));
+                    PRINTF("TIME_SYNC: got bundel from our master %u\n",tmp_load->node_id);
+                    PRINTF("TIME_SYNC: bundel is %lu ms old\n", bundle_ageing_get_age(recv));
                     uint32_t tmp_age = bundle_ageing_get_age(recv);
                     udtn_timeval_t tmp_val;
                     udtn_timeval_t set_timeval;
@@ -302,7 +302,7 @@ PROCESS_THREAD(timesync_process, ev, data)
                     udtn_settimeofday(&set_timeval);
                     if (udtn_getclockstate() < UDTN_CLOCK_STATE_POOR){
                         udtn_setclockstate(UDTN_CLOCK_STATE_POOR);
-                        printf("TIMESYNC: set clock state poor\n");
+                        PRINTF("TIMESYNC: set clock state poor\n");
                     }
                 }
 			}
