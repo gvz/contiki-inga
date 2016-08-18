@@ -59,9 +59,6 @@
 #include "system_clock.h"
 #include "bundle_ageing.h"
 
-#define MODE_PASSIVE 0
-#define MODE_ACTIVE 1
-#define MODE_LOOPBACK 2
 
 
 
@@ -73,11 +70,6 @@
 #define PRINTF(...)
 #endif
 
-#ifdef CONF_PING_TIMEOUT
-#define PING_TIMEOUT CONF_PING_TIMEOUT
-#else
-#define PING_TIMEOUT 10
-#endif
 /*---------------------------------------------------------------------------*/
 PROCESS(timesync_process, "Timesync");
 
@@ -86,10 +78,6 @@ AUTOSTART_PROCESSES(&timesync_process);
 static uint8_t pairing_active = 1;
 /*---------------------------------------------------------------------------*/
 
-static clock_time_t get_time()
-{
-	return clock_time();
-}
 
 /* Convenience function to populate a bundle */
 static inline struct mmem *bundle_convenience(uint16_t dest, uint16_t dst_srv, uint16_t src_srv,  uint8_t *data, size_t len)
@@ -161,9 +149,6 @@ PROCESS_THREAD(timesync_process, ev, data)
 	static struct time_sync_payload_t time_sync_payload;
 
 
-	static uint32_t * timestamp;
-	static uint32_t * sequence;
-	static uint8_t sent = 0;
 	static uint8_t i = 0;
 
 	PROCESS_BEGIN();
@@ -189,12 +174,10 @@ PROCESS_THREAD(timesync_process, ev, data)
 	printf("started timesync process\n");
 
 
-	/* Transfer */
 	while(1) {
 		etimer_set(&timer, CLOCK_SECOND);
 		PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&timer) ||
 				ev == submit_data_to_application_event);
-        clock_time_t tmp_sec = clock_seconds();
 
         if (etimer_expired(&timer)) {
 
