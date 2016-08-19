@@ -161,6 +161,8 @@ PROCESS_THREAD(timesync_process, ev, data)
 		udtn_clock_state_t state;
 		udtn_timeval_t time;
 		uint16_t node_id;
+		uint8_t pairing;
+		uint16_t master;
 	} ;
 	static struct time_sync_payload_t time_sync_payload;
 
@@ -202,6 +204,8 @@ PROCESS_THREAD(timesync_process, ev, data)
 				time_sync_payload.state = udtn_getclockstate();
 				udtn_gettimeofday(&time_sync_payload.time);
 				time_sync_payload.node_id = dtn_node_id;
+				time_sync_payload.master = dtn_node_id;
+				time_sync_payload.pairing = pairing_active;
 				bundlemem = bundle_convenience(SYNC_MULTICAST_ID, SYNC_MULTICAST_SRV_ID, SYNC_MULTICAST_SRV_ID, (uint8_t*)&time_sync_payload, sizeof(struct time_sync_payload_t));
                 if (bundlemem) {
 	                process_post(&agent_process, dtn_send_bundle_event, (void *) bundlemem);
@@ -262,24 +266,21 @@ PROCESS_THREAD(timesync_process, ev, data)
 				}
                 struct bundle_t * bundle = NULL;
                 bundle = (struct bundle_t *) MMEM_PTR(recv);
-                if (!known && pairing_active && (bundle->dst_node == SYNC_MULTICAST_ID)){
+                if ( tmp_load->pairing && !known && pairing_active && (bundle->dst_node == SYNC_MULTICAST_ID)){
 	                //add node to timesync group if pairing mode is active
 	                PRINTF("TIME_SYNC: adding %u to timesync group\n",tmp_load->node_id);
 	                timesync_group[next] = tmp_load->node_id;
-	                if ( (tmp_load->node_id < timesync_master && tmp_load->state >= udtn_getclockstate()) ||
+	                if ( tmp_load->master != dtn_node_id && tmp_load->pairing && (tmp_load->node_id < timesync_master && tmp_load->state >= udtn_getclockstate()) ||
 	                     // if the node_id is smaller and the cock is equal of more accurate as ours 
 	                     tmp_load->state > udtn_getclockstate() ){
 		                // or if the its clock is more accurate we use it as the clock master
 
-		                timesync_master = tmp_load->node_id;
-                        PRINTF("TIME_SYNC: %u is our master \n",tmp_load->node_id);
-
-                        struct bundle_t * bundle = NULL;
-                        bundle = (struct bundle_t *) MMEM_PTR(recv);
 	                        
                         time_sync_payload.state = udtn_getclockstate();
                         udtn_gettimeofday(&time_sync_payload.time);
                         time_sync_payload.node_id = dtn_node_id;
+                        time_sync_payload.master = timesync_master;
+                        time_sync_payload.pairing = pairing_active;
                         bundlemem = bundle_convenience(bundle->src_node, bundle->src_srv, SYNC_MULTICAST_SRV_ID, (uint8_t*)&time_sync_payload, sizeof(struct time_sync_payload_t));
                         if (bundlemem) {
                             process_post(&agent_process, dtn_send_bundle_event, (void *) bundlemem);
@@ -287,7 +288,13 @@ PROCESS_THREAD(timesync_process, ev, data)
                         } else {
 	                        PRINTF("TIME_SYNC: unable to send sync\n");
                         }
+
+		                timesync_master = tmp_load->node_id;
+                        PRINTF("TIME_SYNC: %u is our master \n",tmp_load->node_id);
+
 	                }
+                }else if ( tmp_load->pairing && !known && pairing_active && (bundle->dst_node == dtn_node_id)){
+	                timesync_group[next] = tmp_load->node_id;
                 }
                 if (tmp_load->node_id == timesync_master){
 	                // this is a time sync packet form our time master, so we need to set our clock
@@ -300,6 +307,21 @@ PROCESS_THREAD(timesync_process, ev, data)
                     tmp_val.tv_usec = (tmp_age - tmp_val.tv_sec) * 1000;
                     udtn_timeradd(&tmp_load->time, &tmp_val, &set_timeval);
                     udtn_settimeofday(&set_timeval);
+                    if (pairing_active && tmp_load->pairing){
+	                        
+                        time_sync_payload.state = udtn_getclockstate();
+                        udtn_gettimeofday(&time_sync_payload.time);
+                        time_sync_payload.node_id = dtn_node_id;
+                        time_sync_payload.master = timesync_master;
+                        time_sync_payload.pairing = pairing_active;
+                        bundlemem = bundle_convenience(bundle->src_node, bundle->src_srv, SYNC_MULTICAST_SRV_ID, (uint8_t*)&time_sync_payload, sizeof(struct time_sync_payload_t));
+                        if (bundlemem) {
+                            process_post(&agent_process, dtn_send_bundle_event, (void *) bundlemem);
+                            PRINTF("TIME_SYNC: sending sync\n");
+                        } else {
+	                        PRINTF("TIME_SYNC: unable to send sync\n");
+                        }
+                    }
                     if (udtn_getclockstate() < UDTN_CLOCK_STATE_POOR){
                         udtn_setclockstate(UDTN_CLOCK_STATE_POOR);
                         PRINTF("TIMESYNC: set clock state poor\n");
