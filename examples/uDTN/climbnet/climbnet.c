@@ -32,6 +32,8 @@
 #include "button-sensor.h"
 #include "pressure-sensor.h"
 #include "leds.h"
+#include "fat/diskio.h"
+#include "fat/cfs-fat.h"
 
 #define DEBUG 1
 #if DEBUG
@@ -98,6 +100,8 @@ PROCESS_THREAD(climbnet_process, ev, data)
     static struct registration_api reg_dummy;
     static uint8_t synced = 0;
     static uint16_t timesync_master;
+    static struct diskio_device_info *info = 0;
+    static struct FAT_Info fat;
     struct mmem *bundlemem, *recv;
     typedef struct {
         int16_t temperature;
@@ -112,12 +116,16 @@ PROCESS_THREAD(climbnet_process, ev, data)
     static uint16_t climbnet_payload_pointer = 0;
 
     static uint8_t i = 0;
+    static char filename[] = "cn0001.csv";
+    static char message[30];
 
     PROCESS_BEGIN();
 	leds_off(LEDS_GREEN | LEDS_YELLOW); 
     etimer_set(&timer, CLOCK_SECOND);
     PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&timer) );
+    SDCARD_POWER_ON();
     timesync_init();
+    diskio_detect_devices();
     
     /* Register our endpoint */
     reg_climb.status = APP_ACTIVE;
@@ -154,6 +162,52 @@ PROCESS_THREAD(climbnet_process, ev, data)
         PROCESS_EXIT();
     }
 
+    uint8_t initialized = 0;
+    info = diskio_devices();
+    for (i = 0; i < DISKIO_MAX_DEVICES; i++) {
+
+        // break if we have found an SD card partition
+        if ((info + i)->type == (DISKIO_DEVICE_TYPE_SD_CARD | DISKIO_DEVICE_TYPE_PARTITION)) {
+            info += i;
+            initialized = 1;
+            break; 
+        }
+    }
+    // mount volume
+    uint8_t retval = cfs_fat_mount_device(info);
+    if (retval == 1) {
+        PRINTF("Error: Boot sector not found\n");
+    } else if (retval == 2) {
+        PRINTF("Error: Unsupported FAT type\n");
+    } else {
+        PRINTF("FAT volume mounted\n");
+    }
+    // let us know some infos about our device 
+    cfs_fat_get_fat_info( &fat );
+    PRINTF("Volume Size: %lu bytes\n", 512UL * fat.BPB_TotSec);
+    PRINTF("             %lu sectors\n", fat.BPB_TotSec);
+    // select as default device
+    diskio_set_default_device(info);
+    // open file
+    static int fd = 1; 
+    static uint32_t n=1;
+	PRINTF(" try opening file for reading %s \n", filename);
+	 while (fd != -1 && n <= 9999) {
+	     fd = cfs_open(filename, CFS_READ);
+	     if ( fd != -1 ){
+	         PRINTF("TIMESYNC: file exists\n");
+	         cfs_close(fd);
+	         n++;
+	         sprintf(filename,"cn%04lu.csv",n);
+	         printf("cn%04lu.csv",n);
+	     }
+	 }
+	 if (fd == -1) {
+	     PRINTF(" failed opening file for reading %s \n", filename);
+	 }
+
+    
+
     etimer_set(&timer, CLOCK_SECOND);
     while (1) {
         PROCESS_YIELD();
@@ -187,15 +241,25 @@ PROCESS_THREAD(climbnet_process, ev, data)
 	            tmp = CLIMBNET_MEASURE_INTERVAL;
             }
             etimer_set(&measurement_timer, (tmp * CLOCK_SECOND) - tmpusec);
-            PRINTF("CLIMBNET: measure\n");
+            //PRINTF("CLIMBNET: measure\n");
             // get temperature value
             int16_t tempval = temppress_sensor->value(TEMP);
             // get 32bit pressure value
             int32_t pressval = ((int32_t) temppress_sensor->value(PRESS_H) << 16);
             pressval |= (temppress_sensor->value(PRESS_L) & 0xFFFF);
             // read and output values
-            PRINTF("CLIMBNET: %d, press: %ld time: %lu\n", tempval, pressval, date.tv_sec);
+            //PRINTF("CLIMBNET: %d, press: %ld time: %lu\n", tempval, pressval, date.tv_sec);
 
+            // open file
+            fd = cfs_open(filename, CFS_APPEND);
+            if (fd == -1) {
+                PRINTF("Error: failed opening file for write %s \n",filename);
+            }else{
+	            sprintf(message,"%lu,%lu,%u\n",date.tv_sec,pressval,tempval);
+                uint32_t n = cfs_write(fd, message, sizeof(message));
+                PRINTF("%lu bytes wrote from '%s'\n", n, filename);
+	            cfs_close(fd);
+            }
             // save measurement in array 
             climbnet_payload_a[climbnet_payload_pointer].time = date.tv_sec;
             climbnet_payload_a[climbnet_payload_pointer].height.pressure = pressval;
@@ -204,6 +268,13 @@ PROCESS_THREAD(climbnet_process, ev, data)
             climbnet_payload_pointer++;
             if (climbnet_payload_pointer >= 80 / sizeof(climbnet_payload_t)){
 	            climbnet_payload_pointer = 0;
+	            bundlemem = bundle_convenience(CLIMBNET_MULTICAST_ID, CLIMBNET_MULTICAST_SRV_ID, CLIMBNET_MULTICAST_SRV_ID, (uint8_t*)&climbnet_payload_a, (80 / sizeof(climbnet_payload_t))* sizeof(climbnet_payload_t));
+                if (bundlemem) {
+                    process_post(&agent_process, dtn_send_bundle_event, (void *) bundlemem);
+                    PRINTF("TIME_SYNC: sending sync reply\n");
+                } else {
+                    PRINTF("TIME_SYNC: unable to send sync reply\n");
+                }
             }
 
         }
