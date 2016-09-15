@@ -86,7 +86,40 @@ static inline struct mmem *bundle_convenience(uint16_t dest, uint16_t dst_srv, u
 
 	return bundlemem;
 }
+int save_data(char *filename, char *data, uint16_t len, struct diskio_device_info *info){
 
+    SDCARD_POWER_ON();
+    static struct FAT_Info fat;
+    uint8_t initialized = 0;
+    uint8_t i;
+    // mount volume
+    uint8_t retval = cfs_fat_mount_device(info);
+    if (retval == 1) {
+        PRINTF("Error: Boot sector not found\n");
+    } else if (retval == 2) {
+        PRINTF("Error: Unsupported FAT type\n");
+    } else {
+        PRINTF("FAT volume mounted\n");
+    }
+    // let us know some infos about our device 
+    cfs_fat_get_fat_info( &fat );
+    PRINTF("Volume Size: %lu bytes\n", 512UL * fat.BPB_TotSec);
+    PRINTF("             %lu sectors\n", fat.BPB_TotSec);
+    // select as default device
+    diskio_set_default_device(info);
+    // open file
+    static int fd = 1; 
+    static uint32_t n=1;
+     fd = cfs_open(filename, CFS_APPEND);
+     if (fd == -1) {
+         PRINTF("Error: failed opening file for append %s \n",filename);
+     }else{
+         uint32_t n = cfs_write(fd, data, len);
+         PRINTF("%lu bytes wrote from '%s'\n", n, filename);
+         cfs_close(fd);
+     }
+
+}
 
 PROCESS_THREAD(climbnet_process, ev, data)
 {
@@ -117,7 +150,7 @@ PROCESS_THREAD(climbnet_process, ev, data)
 
     static uint8_t i = 0;
     static char filename[] = "cn0001.csv";
-    static char message[30];
+    static char message[100];
 
     PROCESS_BEGIN();
 	leds_off(LEDS_GREEN | LEDS_YELLOW); 
@@ -139,6 +172,7 @@ PROCESS_THREAD(climbnet_process, ev, data)
     reg_dummy.node_id = dtn_node_id;
     process_post(&agent_process, dtn_application_registration_event, &reg_dummy);
     PRINTF("started climbnet process\n");
+    SDCARD_POWER_ON();
 
     /* Hardware init*/
     // get pointer to sensor
@@ -202,9 +236,18 @@ PROCESS_THREAD(climbnet_process, ev, data)
 	         printf("cn%04lu.csv",n);
 	     }
 	 }
-	 if (fd == -1) {
-	     PRINTF(" failed opening file for reading %s \n", filename);
-	 }
+	 memset(message, 0, 100);
+     fd = cfs_open(filename, CFS_WRITE);
+     if (fd == -1) {
+         PRINTF("Error: failed opening file for write %s \n",filename);
+     }else{
+         sprintf(message,"Timestamp,X,Y,Z\n");
+         // strlen +1 to get \n into the file
+         uint32_t n = cfs_write(fd, message, strlen(message)+1);
+         PRINTF("%lu bytes wrote from '%s'\n", n, filename);
+         cfs_close(fd);
+     }
+	 memset(message, 0, 100);
 
     
 
@@ -251,15 +294,10 @@ PROCESS_THREAD(climbnet_process, ev, data)
             //PRINTF("CLIMBNET: %d, press: %ld time: %lu\n", tempval, pressval, date.tv_sec);
 
             // open file
-            fd = cfs_open(filename, CFS_APPEND);
-            if (fd == -1) {
-                PRINTF("Error: failed opening file for write %s \n",filename);
-            }else{
-	            sprintf(message,"%lu,%lu,%u\n",date.tv_sec,pressval,tempval);
-                uint32_t n = cfs_write(fd, message, sizeof(message));
-                PRINTF("%lu bytes wrote from '%s'\n", n, filename);
-	            cfs_close(fd);
-            }
+	        sprintf(message,"%lu,%lu,%u\n",date.tv_sec,pressval,tempval);
+	        // strlen +1 to get \n into the file
+	        save_data(filename,message,strlen(message)+1,info);
+	        memset(message, 0, 100);
             // save measurement in array 
             climbnet_payload_a[climbnet_payload_pointer].time = date.tv_sec;
             climbnet_payload_a[climbnet_payload_pointer].height.pressure = pressval;
@@ -271,13 +309,29 @@ PROCESS_THREAD(climbnet_process, ev, data)
 	            bundlemem = bundle_convenience(CLIMBNET_MULTICAST_ID, CLIMBNET_MULTICAST_SRV_ID, CLIMBNET_MULTICAST_SRV_ID, (uint8_t*)&climbnet_payload_a, (80 / sizeof(climbnet_payload_t))* sizeof(climbnet_payload_t));
                 if (bundlemem) {
                     process_post(&agent_process, dtn_send_bundle_event, (void *) bundlemem);
-                    PRINTF("TIME_SYNC: sending sync reply\n");
-                } else {
-                    PRINTF("TIME_SYNC: unable to send sync reply\n");
                 }
             }
-
         }
+		if( ev == submit_data_to_application_event ) {
+			/* We received a bundle - handle it */
+			recv = (struct mmem *) data;
+			/* Check receiver */
+			block = bundle_get_payload_block(recv);
+			if( block == NULL ) {
+				PRINTF("TIME_SYNC: No Payload\n");
+			} else {
+				uint16_t n = (80 / sizeof(climbnet_payload_t))* sizeof(climbnet_payload_t);
+				climbnet_payload_t *payload = (climbnet_payload_t*)block->payload;
+				//do {
+
+				//}while (n > 0);
+				
+
+			}
+
+		}
+
+
     
     }
 
