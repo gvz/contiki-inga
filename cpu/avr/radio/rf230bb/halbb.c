@@ -569,6 +569,38 @@ hal_frame_read(hal_rx_frame_t *rx_frame)
 
     uint8_t frame_length, *rx_data;
 
+    
+    //START of hacky glossy implementation
+    /* read sequence number and src address*/
+    uint8_t seq_no;
+    static uint8_t seq_no_static;
+    uint8_t src_addr;
+    static uint8_t src_addr_static;
+    hal_sram_read(2,1,&seq_no);
+    hal_sram_read(7,2,&src_addr);
+    if(!((seq_no == seq_no_static) &&(src_addr == src_addr_static))){
+	    // we have not seen this packet before
+	    
+	    uint8_t glossy_identifier;
+	    hal_sram_read(8,1,&glossy_identifier);
+	    uint16_t dst_addr;
+        hal_sram_read(5,2,&dst_addr);
+        if((glossy_identifier == 0x55) && (dst_addr == 0xffff)){
+	        // only rely packet that are broadcast and have the glossy identifier
+            // read hop count in the second byte of the packet
+            uint8_t hop_count;
+            hal_sram_read(9,1,&hop_count);
+            hop_count++;
+            hal_sram_write(9,1,&hop_count);
+            if (hop_count < 8){
+                hal_set_slptr_high();
+                hal_set_slptr_low();
+            }
+	    }
+    }
+    //END of hacky glossy implementation
+    
+    
     /*Send frame read (long mode) command.*/
     HAL_SPI_TRANSFER_OPEN();
     HAL_SPI_TRANSFER(0x20);
