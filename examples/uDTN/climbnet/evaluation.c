@@ -123,8 +123,7 @@ PROCESS_THREAD(climbnet_process, ev, data)
     etimer_set(&timer, CLOCK_SECOND);
     PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&timer) );
     timesync_init();
-    timesync_activate_pairing();
-    leds_on( LEDS_YELLOW); 
+    //    timesync_activate_pairing();
 
     PCMSK0 |= (1 << PCINT0);
     PCICR |= (1 << PCIE0);
@@ -136,10 +135,11 @@ PROCESS_THREAD(climbnet_process, ev, data)
         if (udtn_getclockstate() > UDTN_CLOCK_STATE_UNKNOWN){
             leds_on(LEDS_GREEN);
             leds_off( LEDS_YELLOW); 
-	        timesync_deactivate_pairing();
+            // timesync_deactivate_pairing();
         }
         else{
 	        timesync_activate_pairing();
+	        leds_on( LEDS_YELLOW); 
         }
     }
 
@@ -150,5 +150,5 @@ PROCESS_THREAD(climbnet_process, ev, data)
 ISR(PCINT0_vect){
 	udtn_timeval_t time;
     udtn_gettimeofday(&time);
-    printf("%lu %lu\n",time.tv_sec,time.tv_usec);
+    printf("%lu %06lu\n",time.tv_sec,time.tv_usec);
 }
