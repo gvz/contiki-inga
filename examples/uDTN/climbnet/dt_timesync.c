@@ -76,12 +76,12 @@ PROCESS(timesync_process, "Timesync");
 AUTOSTART_PROCESSES(&timesync_process);
 
 #define MAX_SYNC_GROUP_MEMBERS 10
-#define SYNC_MULTICAST_ID 1
+#define SYNC_MULTICAST_ID 99
 #define SYNC_MULTICAST_SRV_ID 12
 
 static uint8_t pairing_active = 0;
 static uint16_t timesync_group[MAX_SYNC_GROUP_MEMBERS]; 
-static uint16_t timesync_interval = 10;
+static uint16_t timesync_interval = 60;
 /*---------------------------------------------------------------------------*/
 
 
@@ -170,7 +170,8 @@ PROCESS_THREAD(timesync_process, ev, data)
 	static uint8_t i = 0;
 
 	PROCESS_BEGIN();
-	timesync_master = dtn_node_id;
+	timesync_master = 1;
+	//timesync_master = dtn_node_id;
 	for (; i<MAX_SYNC_GROUP_MEMBERS; i++){
 		timesync_group[i]=0;
 	}
@@ -193,9 +194,14 @@ PROCESS_THREAD(timesync_process, ev, data)
 
 
 	while(1) {
-		etimer_set(&timer, CLOCK_SECOND);
+		if (udtn_getclockstate() < UDTN_CLOCK_STATE_POOR){
+			etimer_set(&timer, CLOCK_SECOND);
+		}else{
+			etimer_set(&timer, timesync_interval*CLOCK_SECOND);
+		}
 		PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&timer) ||
 				ev == submit_data_to_application_event);
+			
 
         if (etimer_expired(&timer)) {
 
@@ -248,7 +254,7 @@ PROCESS_THREAD(timesync_process, ev, data)
 					process_post(&agent_process, dtn_processing_finished, recv);
 					continue;
                 }
-				PRINTF("TIME_SYNC: received budle from %u\n",tmp_load->node_id);
+				PRINTF("TIME_SYNC: received budle from %u with state %u\n",tmp_load->node_id,tmp_load->state);
 
 				// check if this node is kown
                 i = 0;
