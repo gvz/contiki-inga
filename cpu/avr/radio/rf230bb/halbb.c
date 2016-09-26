@@ -72,6 +72,7 @@ extern uint8_t debugflowsize,debugflow[DEBUGFLOWSIZE];
 #include <stdlib.h>
 
 #include "hal.h"
+#include "sys/node-id.h"
 
 #if defined(__AVR_ATmega128RFA1__)
 #include <avr/io.h>
@@ -573,30 +574,66 @@ hal_frame_read(hal_rx_frame_t *rx_frame)
     //START of hacky glossy implementation
     /* read sequence number and src address*/
     uint8_t seq_no;
-    static uint8_t seq_no_static;
-    uint8_t src_addr;
-    static uint8_t src_addr_static;
-    hal_sram_read(2,1,&seq_no);
-    hal_sram_read(7,2,&src_addr);
-    if(!((seq_no == seq_no_static) &&(src_addr == src_addr_static))){
-	    // we have not seen this packet before
-	    
-	    uint8_t glossy_identifier;
-	    hal_sram_read(8,1,&glossy_identifier);
-	    uint16_t dst_addr;
-        hal_sram_read(5,2,&dst_addr);
-        if((glossy_identifier == 0x55) && (dst_addr == 0xffff)){
-	        // only rely packet that are broadcast and have the glossy identifier
-            // read hop count in the second byte of the packet
-            uint8_t hop_count;
-            hal_sram_read(9,1,&hop_count);
-            hop_count++;
-            hal_sram_write(9,1,&hop_count);
-            if (hop_count < 8){
-                hal_set_slptr_high();
-                hal_set_slptr_low();
+    volatile static uint8_t seq_no_static;
+    uint16_t src_addr;
+    volatile static uint16_t src_addr_static;
+    volatile static uint8_t int_pending;
+    if (int_pending){
+	    int_pending = 0;
+	    return;
+    }
+    hal_sram_read(3,1,&seq_no);
+    hal_sram_read(8,2,&src_addr);
+    printf(" %u %u\n",src_addr, node_id);
+    if(!(src_addr == node_id)){
+        if(!((seq_no == seq_no_static) &&(src_addr == src_addr_static) )){
+            // we have not seen this packet before
+                src_addr_static = src_addr;
+                seq_no_static = seq_no;
+
+            uint8_t glossy_identifier;
+            hal_sram_read(10,1,&glossy_identifier);
+            uint16_t dst_addr;
+            hal_sram_read(6,2,&dst_addr);
+            if((glossy_identifier == 0x55) && (dst_addr == 0xffff)){
+                // only rely packet that are broadcast and have the glossy identifier
+                // read hop count in the second byte of the packet
+                uint8_t hop_count;
+                hal_sram_read(11,1,&hop_count);
+                hop_count++;
+                hal_sram_write(11,1,&hop_count);
+                if (hop_count < 8){
+                    hal_subregister_write(SR_TRX_CMD, PLL_ON);
+                    // while (1) {
+                    //     uint8_t radio_state;
+                    //     radio_state = hal_subregister_read(SR_TRX_STATUS);
+                    //     if (radio_state == PLL_ON ){ 
+                    //         break;
+                    //     }
+                    // }
+                    printf("rely \n");
+                    hal_set_slptr_high();
+                    hal_set_slptr_low();
+                    int_pending = 1;
+                    while (1) {
+                        if (hal_get_slptr()) break;
+                        uint8_t radio_state;
+                        radio_state = hal_subregister_read(SR_TRX_STATUS);
+                        if (radio_state != BUSY_TX ){ 
+                            break;
+                        }
+                    }
+                    hal_subregister_write(SR_TRX_CMD, RX_AACK_ON);
+                }else{
+                    printf("max hop count\n");
+                }
+            }else{
+                printf("wrong identifier %u or dst_addr %u\n",glossy_identifier,dst_addr);
+
             }
-	    }
+        }else{
+            printf("have seen it before %u \n", seq_no);
+        }
     }
     //END of hacky glossy implementation
     
@@ -709,7 +746,7 @@ hal_frame_write(uint8_t *write_buffer, uint8_t length)
 }
 
 /*----------------------------------------------------------------------------*/
-#if 0  //Uses 80 bytes (on Raven) omit unless needed
+#if 1  //Uses 80 bytes (on Raven) omit unless needed
 /** \brief Read SRAM
  *
  * This function reads from the SRAM of the radio transceiver.
@@ -741,7 +778,7 @@ hal_sram_read(uint8_t address, uint8_t length, uint8_t *data)
 }
 #endif
 /*----------------------------------------------------------------------------*/
-#if 0  //omit unless needed
+#if 1  //omit unless needed
 /** \brief Write SRAM
  *
  * This function writes into the SRAM of the radio transceiver. It can reduce
