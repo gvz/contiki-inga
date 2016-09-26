@@ -370,7 +370,9 @@ load_config(void)
   if(inga_cfg.pan_addr == 0x0000) {
     inga_cfg.pan_addr = pan_addr_from_eui64(inga_cfg.eui64_addr);
   }
-
+  if(node_id == 0){
+      node_id_restore();
+  }
 }
 /*----------------------------------------------------------------------------*/
 void
